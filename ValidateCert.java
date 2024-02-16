@@ -3,7 +3,6 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-import java.util.Objects;
 
 public class ValidateCert {
     public static void main(String[] args) {
@@ -47,23 +46,16 @@ public class ValidateCert {
                     "decipherOnly"
             };
 
+            System.out.println("Key usage:");
             boolean[] keyUsage = x509Certificate.getKeyUsage();
             if (keyUsage != null) {
                 for (int i = 0; i < keyUsage.length; i++) {
                     if (keyUsage[i]) {
-                        System.out.println(keyUsageStr[i]);
+                        System.out.println("\t" + keyUsageStr[i]);
                     }
                 }
             } else {
                 System.out.println("No key usage information available.");
-            }
-            
-            // On vérifie l'extension KeyUsage
-            if (Objects.requireNonNull(keyUsage)[0] || keyUsage[5] || keyUsage[6]) {
-                System.out.println("KeyUsage: Valid (Digital Signature, Key Encipherment, or Data Encipherment)");
-            } else {
-                System.out.println("KeyUsage: Invalid");
-                
             }
 
             // On vérifie la validité du certificat
@@ -80,7 +72,7 @@ public class ValidateCert {
             // On vérifie la signature avec l'API cryptographique
             Signature sig = Signature.getInstance(sigAlgName);
             sig.initVerify(publicKey);
-            sig.update(x509Certificate.getTBSCertificate()); // TBSCertificate is the part of the certificate that is signed
+            sig.update(x509Certificate.getTBSCertificate());
 
             if (sig.verify(signature)) {
                 System.out.println("Signature verification successful");
