@@ -26,8 +26,12 @@ public class ValidateCert {
                 return;
             }
 
-            
-            
+            PublicKey publicKey = x509Certificate.getPublicKey();
+            x509Certificate.verify(publicKey);
+
+            System.out.println("Certificate is valid");
+            System.out.println("Subject: " + x509Certificate.getSubjectX500Principal());
+            System.out.println("Issuer: " + x509Certificate.getIssuerX500Principal());
 
         } catch (Exception e) {
             System.out.println("Error: " + e.getMessage());
