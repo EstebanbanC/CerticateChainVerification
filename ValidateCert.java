@@ -3,6 +3,7 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.Objects;
 
 public class ValidateCert {
     public static void main(String[] args) {
@@ -58,7 +59,7 @@ public class ValidateCert {
             }
             
             // On vérifie l'extension KeyUsage
-            if (keyUsage[0] || keyUsage[5] || keyUsage[6]) {
+            if (Objects.requireNonNull(keyUsage)[0] || keyUsage[5] || keyUsage[6]) {
                 System.out.println("KeyUsage: Valid (Digital Signature, Key Encipherment, or Data Encipherment)");
             } else {
                 System.out.println("KeyUsage: Invalid");
