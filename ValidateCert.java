@@ -1,5 +1,6 @@
 import java.io.FileInputStream;
 import java.security.PublicKey;
+import java.security.Signature;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 
@@ -26,12 +27,44 @@ public class ValidateCert {
                 return;
             }
 
-            PublicKey publicKey = x509Certificate.getPublicKey();
-            x509Certificate.verify(publicKey);
+            PublicKey publicKey = x509Certificate.getPublicKey(); // On récupère la clé publique du certificat
+            x509Certificate.verify(publicKey); // On vérifie la signature du certificat avec sa clé publique
 
-            System.out.println("Certificate is valid");
+            // On affiche les informations du certificat
             System.out.println("Subject: " + x509Certificate.getSubjectX500Principal());
             System.out.println("Issuer: " + x509Certificate.getIssuerX500Principal());
+
+            // On vérifie l'extension KeyUsage
+            boolean[] keyUsage = x509Certificate.getKeyUsage();
+            if (keyUsage[0] == true || keyUsage[5] == true || keyUsage[6] == true) {
+                System.out.println("KeyUsage: Valid (Digital Signature, Key Encipherment, or Data Encipherment)");
+            } else {
+                System.out.println("KeyUsage: Invalid");
+                
+            }
+
+            // On vérifie la validité du certificat
+            x509Certificate.checkValidity();
+            System.out.println("Certificate is valid");
+
+            // On vérifie la signature du certificat
+            String sigAlgName = x509Certificate.getSigAlgName();
+            System.out.println("Signature algorithm: " + sigAlgName);
+
+            // On extrait la signature
+            byte[] signature = x509Certificate.getSignature();
+
+            // On vérifie la signature avec l'API cryptographique
+            Signature sig = Signature.getInstance(sigAlgName);
+            sig.initVerify(publicKey);
+            sig.update(x509Certificate.getTBSCertificate()); // TBSCertificate is the part of the certificate that is signed
+
+            if (sig.verify(signature)) {
+                System.out.println("Signature verification successful");
+            } else {
+                System.out.println("Signature verification failed");
+            }
+
 
         } catch (Exception e) {
             System.out.println("Error: " + e.getMessage());
