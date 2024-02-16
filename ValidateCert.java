@@ -34,9 +34,31 @@ public class ValidateCert {
             System.out.println("Subject: " + x509Certificate.getSubjectX500Principal());
             System.out.println("Issuer: " + x509Certificate.getIssuerX500Principal());
 
-            // On vérifie l'extension KeyUsage
+            String[] keyUsageStr = {
+                    "digitalSignature",
+                    "nonRepudiation",
+                    "keyEncipherment",
+                    "dataEncipherment",
+                    "keyAgreement",
+                    "keyCertSign",
+                    "cRLSign",
+                    "encipherOnly",
+                    "decipherOnly"
+            };
+
             boolean[] keyUsage = x509Certificate.getKeyUsage();
-            if (keyUsage[0] == true || keyUsage[5] == true || keyUsage[6] == true) {
+            if (keyUsage != null) {
+                for (int i = 0; i < keyUsage.length; i++) {
+                    if (keyUsage[i]) {
+                        System.out.println(keyUsageStr[i]);
+                    }
+                }
+            } else {
+                System.out.println("No key usage information available.");
+            }
+            
+            // On vérifie l'extension KeyUsage
+            if (keyUsage[0] || keyUsage[5] || keyUsage[6]) {
                 System.out.println("KeyUsage: Valid (Digital Signature, Key Encipherment, or Data Encipherment)");
             } else {
                 System.out.println("KeyUsage: Invalid");
