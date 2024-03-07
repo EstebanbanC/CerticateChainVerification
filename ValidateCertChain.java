@@ -1,16 +1,149 @@
+import java.io.File;
 import java.io.FileInputStream;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.RSAPublicKey;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.math.BigInteger;
 
 import javax.security.auth.x500.X500Principal;
 
 public class ValidateCertChain {
+
+    static String[] keyUsageStr;
+
+
+    public static void main(String[] args) {
+        // Vérification des arguments
+//        if (args.length < 3 || !args[0].equals("-format") || (!args[1].equals("DER") && !args[1].equals("PEM"))) {
+//            System.out.println("[i] Usage: java ValidateCert -format <DER|PEM> <RCAfile, ICAfile, ..., LCAfile>");
+//            return;
+//        }
+//
+//        String[] certFilesLocation = getCertsFilesLocationFromArgs(args);
+
+//        ArrayList<String> argsList = new ArrayList<>();
+//        argsList.add(0, "-format");
+//        argsList.add(1, "DER");
+//        int index = 1;
+//        argsList.add(++index, "certs/1_System_Trust_USERTrust_ECC_Certification_Authority.pem");
+//        argsList.add(++index, "certs/2_Sectigo_ECC_Extended_Validation Secure_Server_CA.pem");
+//        argsList.add(++index, "certs/3_www.tbs-certificates.co.pem");
+
+//        String[] certFilesLocation = listFiles("certs/expired");
+        String[] certFilesLocation = listFiles("certs/tbs");
+
+
+        X509Certificate previousCertificate = null;
+        keyUsageStr = new String[]{
+                "digitalSignature",
+                "nonRepudiation",
+                "keyEncipherment",
+                "dataEncipherment",
+                "keyAgreement",
+                "keyCertSign",
+                "cRLSign",
+                "encipherOnly",
+                "decipherOnly"
+        };
+        Boolean[] checksResult = new Boolean[certFilesLocation.length];
+
+        int i = 0;
+        for (String certFile : certFilesLocation) {
+            try (FileInputStream fileInputStream = new FileInputStream(certFile)) {
+
+                CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+                X509Certificate x509Certificate = (X509Certificate) certificateFactory.generateCertificate(fileInputStream);
+
+                printCertInfo(x509Certificate, certFile);
+
+                System.out.println("Checks :");
+
+
+                boolean isSignatureValid = isSignatureValid(x509Certificate, previousCertificate);
+                boolean isIssuerValid = isIssuerValid(x509Certificate, previousCertificate);
+                boolean isKeyUsageValid = isKeyUsageValid(x509Certificate);
+
+                if (isSignatureValid && isIssuerValid && isKeyUsageValid) {
+                    // Return an exception if the certificate is not valid
+                    x509Certificate.checkValidity();
+                    ConsoleColors.printlnInColor("Certificate is valid.", ConsoleColors.Color.GREEN, null);
+                    checksResult[i] = true;
+                } else {
+                    checksResult[i] = false;
+                }
+
+
+                previousCertificate = x509Certificate;
+
+
+            } catch (Exception e) {
+                printlnError("Error: " + e.getMessage());
+                checksResult[i] = false;
+            }
+            System.out.println();
+        }
+
+        ConsoleColors.printInColor("Result :", ConsoleColors.Color.PURPLE, ConsoleColors.BackgroundColor.BLACK);
+        if (Arrays.asList(checksResult).contains(false)) {
+            ConsoleColors.printlnBlinkInColor(" Certificate chain is not valid :(", ConsoleColors.Color.RED, null);
+        } else {
+            ConsoleColors.printlnBlinkInColor(" Certificate chain is valid :)", ConsoleColors.Color.GREEN, null);
+        }
+    }
+
+    // =================================================================================
+    // Utilitaires
+    public static String[] listFiles(String directoryPath) {
+        File directory = new File(directoryPath);
+        File[] files = directory.listFiles();
+        List<String> fileNames = new ArrayList<>();
+        if (files != null) {
+            Arrays.sort(files); // Sort the files in alphabetical order
+            for (File file : files) {
+                if (file.isFile()) {
+                    fileNames.add(file.getPath());
+                }
+            }
+        }
+        return fileNames.toArray(new String[0]);
+    }
+
+    private static String[] getCertsFilesLocationFromArgs(String[] _args) {
+        String[] certFiles = new String[_args.length - 2];
+
+        System.arraycopy(_args, 2, certFiles, 0, _args.length - 2);
+
+        return certFiles;
+    }
+
+    private static void printlnError(String message) {
+        ConsoleColors.printInColor("\t❌ ", ConsoleColors.Color.RED, null);
+        System.out.println(message);
+    }
+
+    private static void printlnSuccess(String message) {
+        ConsoleColors.printInColor("\t✅ ", ConsoleColors.Color.GREEN, null);
+        System.out.println(message);
+    }
+
+    // =================================================================================
+    private static void printCertInfo(X509Certificate _cert, String _certFileLocation) {
+        String certFileName = _certFileLocation.substring(_certFileLocation.lastIndexOf('/') + 1);
+
+        ConsoleColors.printInColor("Certificate information for ", ConsoleColors.Color.WHITE, ConsoleColors.BackgroundColor.BLACK);
+        ConsoleColors.printInColor(certFileName, ConsoleColors.Color.YELLOW, ConsoleColors.BackgroundColor.BLACK);
+        ConsoleColors.printlnInColor(" :", ConsoleColors.Color.WHITE, ConsoleColors.BackgroundColor.BLACK);
+
+        System.out.println("\t  Issuer : " + _cert.getIssuerX500Principal());
+        System.out.println("\t Subject : " + _cert.getSubjectX500Principal());
+        System.out.println("\tValidity : From " + _cert.getNotBefore() + " to " + _cert.getNotAfter());
+    }
 
     public static boolean verifyRSASignature(X509Certificate cert, X509Certificate issuerCert) {
         try {
@@ -58,129 +191,81 @@ public class ValidateCertChain {
         return false;
     }
 
-    public static void main(String[] args) {
-        if (args.length < 3 || !args[0].equals("-format")) { // Prise en compte des arguments
-            System.out.println("Usage: java ValidateCert -format <DER|PEM> <RCAfile, ICAfile, ..., LCAfile>");
-            return;
+    private static boolean isSignatureValid(X509Certificate _cert, X509Certificate _issuerCert) {
+        if (_issuerCert == null) {
+            _issuerCert = _cert;
         }
+        try {
+            String sigAlgName = _cert.getSigAlgName();
+            PublicKey issuerCertPublicKey = _issuerCert.getPublicKey();
 
-        String[] certFiles = new String[args.length - 2];
-
-        // Initialiser certFiles à partir des arguments à partir du 3ème
-        for (int i = 2; i < args.length; i++) {
-            certFiles[i - 2] = args[i];
-        }
-
-        X509Certificate previousCertificate = null;
-        String[] keyUsageStr = {
-            "digitalSignature",
-            "nonRepudiation",
-            "keyEncipherment",
-            "dataEncipherment",
-            "keyAgreement",
-            "keyCertSign",
-            "cRLSign",
-            "encipherOnly",
-            "decipherOnly"
-        };
-
-        for (String certFile : certFiles) {
-            System.out.println("\nValidating " + certFile);
-            try (FileInputStream fileInputStream = new FileInputStream(certFile)) {
-                CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
-                X509Certificate x509Certificate = (X509Certificate) certificateFactory.generateCertificate(fileInputStream);
-
-                PublicKey publicKey = x509Certificate.getPublicKey();
-
-                if (previousCertificate == null) { // Si on est en train de valider la RCA
-                    // Verfiication de la signature
-                    System.out.println(" Validating signature...");
-                    String sigAlgName = x509Certificate.getSigAlgName();
-                    System.out.println("  Signature algorithm: " + sigAlgName);
-
-                    if (sigAlgName.contains("RSA")) {
-                        if (!verifyRSASignature(x509Certificate, x509Certificate)) {
-                            System.out.println("Error: RSA signature verification failed.");
-                            return;
-                        } else {
-                            System.out.println("  RSA signature verification successful.");
-                        }
-                    } else {
-                        x509Certificate.verify(publicKey);
-                    }
-
-                    // Verification de l'issuer
-                    System.out.println(" Validating issuer...");
-                    X500Principal subject = x509Certificate.getSubjectX500Principal();
-                    X500Principal issuer = x509Certificate.getIssuerX500Principal();
-                    System.out.println("  Subject: " + subject);
-                    System.out.println("  Issuer: " + issuer);
-                    if (!subject.equals(issuer)) {
-                        System.out.println("Error: Subject and issuer are not the same for the RCA.");
-                        return;
-                    }
-                    
+            if (sigAlgName.contains("RSA")) {
+                System.out.println("RSA signature verification");
+                if (!verifyRSASignature(_cert, _issuerCert)) {
+                    printlnError("Error: RSA signature verification failed.");
+                    return false;
                 } else {
-                    // Verification de la signature
-                    System.out.println(" Validating signature...");
-                    PublicKey previousPublicKey = previousCertificate.getPublicKey();
-                    String sigAlgName = x509Certificate.getSigAlgName();
-                    System.out.println("  Signature algorithm: " + sigAlgName);
-
-                    if (sigAlgName.contains("RSA")) {
-                        if (!verifyRSASignature(x509Certificate, previousCertificate)) {
-                            System.out.println("Error: RSA signature verification failed.");
-                            return;
-                        } else {
-                            System.out.println("  RSA signature verification successful.");
-                        }
-                    } else {
-                        x509Certificate.verify(previousPublicKey);
-                    }
-
-                    // Verification de l'issuer
-                    System.out.println(" Validating issuer...");
-                    X500Principal issuer = x509Certificate.getIssuerX500Principal();
-                    X500Principal previousIssuer = previousCertificate.getSubjectX500Principal();
-                    System.out.println("  Issuer: " + issuer);
-                    System.out.println("  Previous issuer: " + previousIssuer);
-                    if (!issuer.equals(previousIssuer)) {
-                        System.out.println("Error: Issuer and previous issuer are not the same.");
-                        return;
-                    }
+                    printlnSuccess("Signature verified successfully.");
+                    return true;
                 }
-
-                // On vérifie l'extension KeyUsage
-                System.out.println(" Validating KeyUsage...");
-                boolean[] keyUsage = x509Certificate.getKeyUsage();
-                if (keyUsage != null) {
-                    for (int i = 0; i < keyUsage.length; i++) {
-                        if (keyUsage[i]) {
-                            System.out.println("  " + keyUsageStr[i]);
-                        }
-                    }
-                } else {
-                    System.out.println(" No key usage information available.");
-                }
-                if (Objects.requireNonNull(keyUsage)[0] || keyUsage[5] || keyUsage[6]) {
-                    System.out.println("  KeyUsage: Valid (Digital Signature, Key Encipherment, or Data Encipherment)");
-                } else {
-                    System.out.println("KeyUsage: Invalid");
-                    return;
-                }
-
-                // On vérifie la validité du certificat
-                System.out.println(" Validating validity...");
-                x509Certificate.checkValidity();
-
-                previousCertificate = x509Certificate;
-
-            } catch (Exception e) {
-                System.out.println("Error: " + e.getMessage());
-                System.out.println("\nCertificate chain is invalid :/");
-                return;
+            } else {
+                _cert.verify(issuerCertPublicKey);
+                printlnSuccess("Signature verified successfully.");
+                return true;
             }
+
+        } catch (Exception e) {
+            printlnError("Error: " + e.getMessage());
+            return false;
         }
-        System.out.println("\nCertificate chain is valid :)");
     }
+
+    private static boolean isIssuerValid(X509Certificate _cert, X509Certificate previousCertificate) {
+        if (previousCertificate == null) {
+            previousCertificate = _cert;
+        }
+        try {
+            X500Principal issuer = _cert.getIssuerX500Principal();
+            X500Principal previousIssuer = previousCertificate.getSubjectX500Principal();
+            if (!issuer.equals(previousIssuer)) {
+                printlnError("Error: Issuer and previous issuer are not the same.");
+                return false;
+            }
+        } catch (Exception e) {
+            printlnError("Error : " + e.getMessage());
+            return false;
+        }
+        printlnSuccess("Issuer verified successfully.");
+        return true;
+    }
+
+    private static Boolean isKeyUsageValid(X509Certificate _cert) {
+        boolean[] keyUsage;
+        try {
+            keyUsage = _cert.getKeyUsage();
+        } catch (Exception e) {
+            printlnError("Error: " + e.getMessage());
+            return false;
+        }
+
+        if (keyUsage == null) {
+            printlnError(" No key usage information available.");
+            return false;
+        }
+
+        try {
+            if (Objects.requireNonNull(keyUsage)[0] || keyUsage[5] || keyUsage[6]) {
+                printlnSuccess("KeyUsage verified successfully.");
+                return true;
+            } else {
+                printlnError("KeyUsage is not valid.");
+                return false;
+            }
+        } catch (NullPointerException e) {
+            printlnError("Error: " + e.getMessage());
+            return false;
+        }
+    }
+
+
 }
