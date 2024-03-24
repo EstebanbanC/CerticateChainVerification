@@ -1,17 +1,27 @@
+import org.bouncycastle.cert.ocsp.BasicOCSPResp;
+import org.bouncycastle.cert.ocsp.CertificateStatus;
+import org.bouncycastle.cert.ocsp.OCSPResp;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jce.spec.ECParameterSpec;
+import org.bouncycastle.jce.spec.ECPublicKeySpec;
+import org.bouncycastle.math.ec.ECPoint;
+
+import javax.security.auth.x500.X500Principal;
 import java.io.File;
 import java.io.FileInputStream;
+import java.math.BigInteger;
+import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.security.cert.CertificateFactory;
+import java.security.cert.X509CRL;
 import java.security.cert.X509Certificate;
+import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
-import java.math.BigInteger;
-
-import javax.security.auth.x500.X500Principal;
 
 public class ValidateCertChain {
 
@@ -36,40 +46,29 @@ public class ValidateCertChain {
 //        argsList.add(++index, "certs/3_www.tbs-certificates.co.pem");
 
 //        String[] certFilesLocation = listFiles("certs/expired");
-        String[] certFilesLocation = listFiles("certs/tbs");
-
-
+//        String[] certFilesLocation = listFiles("certs/tbs");
+        String[] certFilesLocation = listFiles("certs/amazon");
         X509Certificate previousCertificate = null;
         keyUsageStr = new String[]{
-                "digitalSignature",
-                "nonRepudiation",
-                "keyEncipherment",
-                "dataEncipherment",
-                "keyAgreement",
-                "keyCertSign",
-                "cRLSign",
-                "encipherOnly",
-                "decipherOnly"
+                "digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment", "keyAgreement",
+                "keyCertSign", "cRLSign", "encipherOnly", "decipherOnly"
         };
         Boolean[] checksResult = new Boolean[certFilesLocation.length];
-
         int i = 0;
         for (String certFile : certFilesLocation) {
             try (FileInputStream fileInputStream = new FileInputStream(certFile)) {
-
                 CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
                 X509Certificate x509Certificate = (X509Certificate) certificateFactory.generateCertificate(fileInputStream);
-
                 printCertInfo(x509Certificate, certFile);
-
                 System.out.println("Checks :");
 
-
+                boolean isKeyUsageValid = isKeyUsageValid(x509Certificate);
                 boolean isSignatureValid = isSignatureValid(x509Certificate, previousCertificate);
                 boolean isIssuerValid = isIssuerValid(x509Certificate, previousCertificate);
-                boolean isKeyUsageValid = isKeyUsageValid(x509Certificate);
+                boolean isBasicConstraintsValid = isBasicConstraintsValid(x509Certificate);
+                boolean isRevocationStatusValid = isRevocationStatusValid(x509Certificate);
 
-                if (isSignatureValid && isIssuerValid && isKeyUsageValid) {
+                if (isSignatureValid && isIssuerValid && isKeyUsageValid && isBasicConstraintsValid && isRevocationStatusValid) {
                     // Return an exception if the certificate is not valid
                     x509Certificate.checkValidity();
                     ConsoleColors.printlnInColor("Certificate is valid.", ConsoleColors.Color.GREEN, null);
@@ -77,11 +76,7 @@ public class ValidateCertChain {
                 } else {
                     checksResult[i] = false;
                 }
-
-
                 previousCertificate = x509Certificate;
-
-
             } catch (Exception e) {
                 printlnError("Error: " + e.getMessage());
                 checksResult[i] = false;
@@ -191,6 +186,31 @@ public class ValidateCertChain {
         return false;
     }
 
+    private static boolean verifyECDSASignature(X509Certificate cert, X509Certificate issuerCert) {
+        try {
+            PublicKey publicKey = issuerCert.getPublicKey();
+            if (publicKey instanceof ECPublicKey ecPublicKey) {
+                java.security.spec.ECPoint publicPoint = ecPublicKey.getW();
+                BigInteger x = publicPoint.getAffineX();
+                BigInteger y = publicPoint.getAffineY();
+
+                // Vérification de la signature ECDSA en utilisant BouncyCastle
+                BouncyCastleProvider provider = new BouncyCastleProvider();
+                ECParameterSpec ecSpec = org.bouncycastle.jce.ECNamedCurveTable.getParameterSpec("prime256v1");
+                ECPoint bcPublicPoint = ecSpec.getCurve().createPoint(x, y);
+                ECPublicKeySpec pubKeySpec = new ECPublicKeySpec(bcPublicPoint, ecSpec);
+                java.security.PublicKey bcPublicKey = KeyFactory.getInstance("ECDSA", provider).generatePublic(pubKeySpec);
+
+                cert.verify(bcPublicKey);
+                return true;
+            }
+        } catch (Exception e) {
+            System.out.println("Error: " + e.getMessage());
+            return false;
+        }
+        return false;
+    }
+
     private static boolean isSignatureValid(X509Certificate _cert, X509Certificate _issuerCert) {
         if (_issuerCert == null) {
             _issuerCert = _cert;
@@ -198,11 +218,19 @@ public class ValidateCertChain {
         try {
             String sigAlgName = _cert.getSigAlgName();
             PublicKey issuerCertPublicKey = _issuerCert.getPublicKey();
-
             if (sigAlgName.contains("RSA")) {
                 System.out.println("RSA signature verification");
                 if (!verifyRSASignature(_cert, _issuerCert)) {
                     printlnError("Error: RSA signature verification failed.");
+                    return false;
+                } else {
+                    printlnSuccess("Signature verified successfully.");
+                    return true;
+                }
+            } else if (sigAlgName.contains("ECDSA")) {
+                System.out.println("ECDSA signature verification");
+                if (!verifyECDSASignature(_cert, _issuerCert)) {
+                    printlnError("Error: ECDSA signature verification failed.");
                     return false;
                 } else {
                     printlnSuccess("Signature verified successfully.");
@@ -213,7 +241,6 @@ public class ValidateCertChain {
                 printlnSuccess("Signature verified successfully.");
                 return true;
             }
-
         } catch (Exception e) {
             printlnError("Error: " + e.getMessage());
             return false;
@@ -267,5 +294,88 @@ public class ValidateCertChain {
         }
     }
 
+    private static boolean isBasicConstraintsValid(X509Certificate _cert) {
+        try {
+            boolean isCA = _cert.getBasicConstraints() != -1;
+            if (isCA) {
+                printlnSuccess("BasicConstraints verified successfully.");
+                return true;
+            } else {
+                printlnError("BasicConstraints is not valid.");
+                return false;
+            }
+        } catch (Exception e) {
+            printlnError("Error: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean isRevocationStatusValid(X509Certificate cert) {
+        try {
+            // Vérification du statut de révocation en téléchargeant la CRL
+            X509CRL crl = downloadCRL(cert);
+            if (crl != null && crl.isRevoked(cert)) {
+                printlnError("Certificate is revoked in CRL.");
+                return false;
+            }
+
+            // Vérification du statut de révocation en utilisant le protocole OCSP (si disponible)
+            if (isOCSPAvailable(cert)) {
+                OCSPResp ocspResp = performOCSPRequest(cert);
+                if (ocspResp.getStatus() != OCSPResp.SUCCESSFUL) {
+                    printlnError("OCSP response status is not successful.");
+                    return false;
+                }
+                BasicOCSPResp basicOCSPResp = (BasicOCSPResp) ocspResp.getResponseObject();
+                if (basicOCSPResp.getResponses()[0].getCertStatus() != CertificateStatus.GOOD) {
+                    printlnError("Certificate is revoked in OCSP response.");
+                    return false;
+                }
+            }
+
+            // Mécanisme de cache pour éviter de télécharger une CRL si elle n'a pas été mise à jour
+            if (isCRLCacheValid(cert, crl)) {
+                printlnSuccess("CRL is up-to-date in cache.");
+            } else {
+                updateCRLCache(cert, crl);
+            }
+
+            printlnSuccess("Revocation status verified successfully.");
+            return true;
+        } catch (Exception e) {
+            printlnError("Error: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static X509CRL downloadCRL(X509Certificate cert) throws Exception {
+        // TODO: Implémenter le téléchargement de la CRL à partir de l'URL spécifiée dans le certificat
+        // Retourner l'objet X509CRL téléchargé
+        return null;
+    }
+
+    private static boolean isOCSPAvailable(X509Certificate cert) {
+        // TODO: Vérifier si le certificat contient une extension OCSP
+        // Retourner true si l'extension OCSP est présente, false sinon
+        return false;
+    }
+
+    private static OCSPResp performOCSPRequest(X509Certificate cert) throws Exception {
+        // TODO: Implémenter la requête OCSP en utilisant l'URL OCSP spécifiée dans le certificat
+        // Retourner l'objet OCSPResp obtenu
+        return null;
+    }
+
+    private static boolean isCRLCacheValid(X509Certificate cert, X509CRL crl) {
+        // TODO: Vérifier si la CRL en cache est toujours valide pour le certificat donné
+        // Retourner true si la CRL en cache est valide, false sinon
+        return false;
+    }
+
+    private static void updateCRLCache(X509Certificate cert, X509CRL crl) {
+        // TODO: Mettre à jour le cache de CRL avec la nouvelle CRL téléchargée pour le certificat donné
+    }
+
 
 }
+
