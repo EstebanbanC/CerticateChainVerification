@@ -1,22 +1,23 @@
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.ocsp.BasicOCSPResp;
 import org.bouncycastle.cert.ocsp.CertificateStatus;
 import org.bouncycastle.cert.ocsp.OCSPResp;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.jce.spec.ECParameterSpec;
-import org.bouncycastle.jce.spec.ECPublicKeySpec;
-import org.bouncycastle.math.ec.ECPoint;
+import org.bouncycastle.crypto.params.ECPublicKeyParameters;
+import org.bouncycastle.crypto.util.PublicKeyFactory;
+import org.bouncycastle.operator.ContentVerifierProvider;
+import org.bouncycastle.operator.DefaultDigestAlgorithmIdentifierFinder;
+import org.bouncycastle.operator.bc.BcECContentVerifierProviderBuilder;
 
 import javax.security.auth.x500.X500Principal;
 import java.io.File;
 import java.io.FileInputStream;
 import java.math.BigInteger;
-import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509CRL;
 import java.security.cert.X509Certificate;
-import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -45,9 +46,10 @@ public class ValidateCertChain {
 //        argsList.add(++index, "certs/2_Sectigo_ECC_Extended_Validation Secure_Server_CA.pem");
 //        argsList.add(++index, "certs/3_www.tbs-certificates.co.pem");
 
-//        String[] certFilesLocation = listFiles("certs/expired");
+        String[] certFilesLocation = listFiles("certs/expired");
 //        String[] certFilesLocation = listFiles("certs/tbs");
-        String[] certFilesLocation = listFiles("certs/amazon");
+//        String[] certFilesLocation = listFiles("certs/amazon");
+//        String[] certFilesLocation = listFiles("certs/facebook");
         X509Certificate previousCertificate = null;
         keyUsageStr = new String[]{
                 "digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment", "keyAgreement",
@@ -62,10 +64,12 @@ public class ValidateCertChain {
                 printCertInfo(x509Certificate, certFile);
                 System.out.println("Checks :");
 
+                var isLast = i == certFilesLocation.length - 1;
+
                 boolean isKeyUsageValid = isKeyUsageValid(x509Certificate);
                 boolean isSignatureValid = isSignatureValid(x509Certificate, previousCertificate);
                 boolean isIssuerValid = isIssuerValid(x509Certificate, previousCertificate);
-                boolean isBasicConstraintsValid = isBasicConstraintsValid(x509Certificate);
+                boolean isBasicConstraintsValid = isBasicConstraintsValid(x509Certificate, isLast);
                 boolean isRevocationStatusValid = isRevocationStatusValid(x509Certificate);
 
                 if (isSignatureValid && isIssuerValid && isKeyUsageValid && isBasicConstraintsValid && isRevocationStatusValid) {
@@ -76,6 +80,7 @@ public class ValidateCertChain {
                 } else {
                     checksResult[i] = false;
                 }
+                i++;
                 previousCertificate = x509Certificate;
             } catch (Exception e) {
                 printlnError("Error: " + e.getMessage());
@@ -83,7 +88,6 @@ public class ValidateCertChain {
             }
             System.out.println();
         }
-
         ConsoleColors.printInColor("Result :", ConsoleColors.Color.PURPLE, ConsoleColors.BackgroundColor.BLACK);
         if (Arrays.asList(checksResult).contains(false)) {
             ConsoleColors.printlnBlinkInColor(" Certificate chain is not valid :(", ConsoleColors.Color.RED, null);
@@ -188,27 +192,24 @@ public class ValidateCertChain {
 
     private static boolean verifyECDSASignature(X509Certificate cert, X509Certificate issuerCert) {
         try {
-            PublicKey publicKey = issuerCert.getPublicKey();
-            if (publicKey instanceof ECPublicKey ecPublicKey) {
-                java.security.spec.ECPoint publicPoint = ecPublicKey.getW();
-                BigInteger x = publicPoint.getAffineX();
-                BigInteger y = publicPoint.getAffineY();
+            // Conversion des certificats en X509CertificateHolder de BouncyCastle
+            X509CertificateHolder certHolder = new X509CertificateHolder(cert.getEncoded());
+            X509CertificateHolder issuerCertHolder = new X509CertificateHolder(issuerCert.getEncoded());
 
-                // Vérification de la signature ECDSA en utilisant BouncyCastle
-                BouncyCastleProvider provider = new BouncyCastleProvider();
-                ECParameterSpec ecSpec = org.bouncycastle.jce.ECNamedCurveTable.getParameterSpec("prime256v1");
-                ECPoint bcPublicPoint = ecSpec.getCurve().createPoint(x, y);
-                ECPublicKeySpec pubKeySpec = new ECPublicKeySpec(bcPublicPoint, ecSpec);
-                java.security.PublicKey bcPublicKey = KeyFactory.getInstance("ECDSA", provider).generatePublic(pubKeySpec);
+            // Extraction de la clé publique de l'émetteur
+            SubjectPublicKeyInfo publicKeyInfo = issuerCertHolder.getSubjectPublicKeyInfo();
+            ECPublicKeyParameters publicKeyParams = (ECPublicKeyParameters) PublicKeyFactory.createKey(publicKeyInfo);
 
-                cert.verify(bcPublicKey);
-                return true;
-            }
+            // Création du fournisseur de vérification de contenu
+            ContentVerifierProvider verifierProvider = new BcECContentVerifierProviderBuilder(new DefaultDigestAlgorithmIdentifierFinder())
+                    .build(publicKeyParams);
+
+            // Vérification de la signature du certificat
+            return certHolder.isSignatureValid(verifierProvider);
         } catch (Exception e) {
             System.out.println("Error: " + e.getMessage());
             return false;
         }
-        return false;
     }
 
     private static boolean isSignatureValid(X509Certificate _cert, X509Certificate _issuerCert) {
@@ -219,7 +220,6 @@ public class ValidateCertChain {
             String sigAlgName = _cert.getSigAlgName();
             PublicKey issuerCertPublicKey = _issuerCert.getPublicKey();
             if (sigAlgName.contains("RSA")) {
-                System.out.println("RSA signature verification");
                 if (!verifyRSASignature(_cert, _issuerCert)) {
                     printlnError("Error: RSA signature verification failed.");
                     return false;
@@ -294,10 +294,10 @@ public class ValidateCertChain {
         }
     }
 
-    private static boolean isBasicConstraintsValid(X509Certificate _cert) {
+    private static boolean isBasicConstraintsValid(X509Certificate _cert, Boolean isLast) {
         try {
             boolean isCA = _cert.getBasicConstraints() != -1;
-            if (isCA) {
+            if (isCA || isLast) {
                 printlnSuccess("BasicConstraints verified successfully.");
                 return true;
             } else {
