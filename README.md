@@ -1,18 +1,46 @@
-# CerticateChainVerification
+# Vérification de la Chaîne de Certificats
 
-# Execution
+## Auteurs
+
+- [CRISPEL Esteban](https://github.com/EstebanbanC)
+- [DEVAUX Baptiste](https://github.com/Brazok)
+
+## Attention
+
+Une erreur survient lors de la vérification de l'OCSP. Nous n'avons pas réussi à résoudre cette erreur, donc nous ne la prenons pas en compte, mais nous l'affichons quand même.
+
+## Exécution
+
+### ValidateCert
 
 ```bash
-chmod +x run.sh
+java ValidateCert -format <DER|PEM> <certFile>
 ```
+
+### ValidateCertChain
 
 ```bash
-./run.sh
+javac ConsoleColors.java
+java -classpath ".:libs/bcpkix-jdk15on-1.70.jar:libs/bcprov-jdk15on-1.70.jar:libs/bcutil-jdk15on-1.70.jar" ValidateCertChain.java -format <DER|PEM> <RCAfile, ICAfile, ..., LCAfile>
 ```
 
-# TODO
+Ou
 
-- [ ] Vérifier le bon fonctionnement du programme
-- [ ] Vérifier qu'on à répondue à toutes les questions
-- [ ] Prendre en compte les arguments
-- [ ] Faire le rapport
+```bash
+chmod +x validate.sh
+./validate.sh -format <DER|PEM> <RCAfile, ICAfile, ..., LCAfile>
+```
+
+## Remarques
+
+Dans le dossier `certs` se trouvent les certificats utilisés pour les tests : 
+- Amazon 
+- Facebook
+- TBS
+- un certificat expiré
+
+### Exemple
+
+```bash
+./validate.sh -format DER "certs/tbs/1_Authority.pem" "certs/tbs/2_Server_CA.pem" "certs/tbs/3_www.tbs-certificates.co.pem"
+```
